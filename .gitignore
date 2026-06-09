@@ -1,0 +1,6 @@
+node_modules/
+.env
+*.log
+vault/_system/audit.log
+.DS_Store
+dist/
