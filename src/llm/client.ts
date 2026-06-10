@@ -5,11 +5,11 @@ import { logger } from "../utils/logger";
 
 let client: OpenAI | null = null;
 
-export function getDeepSeekClient(): OpenAI {
+export function getLLMClient(): OpenAI {
   if (!client) {
     client = new OpenAI({
-      apiKey: config.deepseek.apiKey,
-      baseURL: config.deepseek.baseURL,
+      apiKey: config.llm.apiKey,
+      baseURL: config.llm.baseURL,
     });
   }
   return client;
@@ -27,13 +27,13 @@ export async function chat(
   messages: ChatCompletionMessageParam[],
   options: ChatOptions = {}
 ) {
-  const ds = getDeepSeekClient();
+  const ds = getLLMClient();
   const {
     tools,
     tool_choice = "auto",
     temperature = 0.7,
     max_tokens = 4096,
-    model = config.deepseek.model,
+    model = config.llm.model,
   } = options;
 
   const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {

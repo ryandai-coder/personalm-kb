@@ -236,6 +236,18 @@ export async function updateFollowupStatus(id: string, status: string): Promise<
   await fs.writeFile(paths.followups, updated.join("\n") + "\n", "utf-8");
 }
 
+/**
+ * Resolve a followup — convenience wrapper that updates status and logs an audit entry.
+ */
+export async function resolveFollowup(id: string, status: string): Promise<void> {
+  await updateFollowupStatus(id, status);
+  await logAuditEntry({
+    action: "resolve_followup",
+    filePath: "",
+    detail: { followupId: id, status },
+  });
+}
+
 export async function flushIndex(): Promise<void> {
   if (!dirty) return;
   await fs.writeFile(paths.index, JSON.stringify(noteIndex, null, 2), "utf-8");

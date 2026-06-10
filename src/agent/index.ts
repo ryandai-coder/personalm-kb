@@ -1,6 +1,6 @@
 import { buildSystemPrompt, type PersonaName } from "./prompt";
 import { TOOL_DEFINITIONS, createToolExecutors, type ToolDeps } from "./tools";
-import { agentLoop } from "../llm/deepseek";
+import { agentLoop } from "../llm/client";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import * as vault from "../vault/index";
 import * as index from "../index/store";
@@ -31,23 +31,44 @@ export interface ProcessMessageParams {
   text: string;
   mode?: "default" | "think" | "search" | "recap";
   persona?: PersonaName;
+  followups?: Array<{ id: string; question: string }>;
 }
 
-export async function processMessage({ text, mode = "default", persona = "default" }: ProcessMessageParams): Promise<{ reply: string }> {
+export async function processMessage({ text, mode = "default", persona = "default", followups }: ProcessMessageParams): Promise<{ reply: string }> {
   const systemPrompt = buildSystemPrompt(persona as PersonaName);
 
   let userMessage = text;
   const tools: ChatCompletionTool[] = [...TOOL_DEFINITIONS];
 
+  // Inject pending followups into the prompt if any
+  let followupBlock = "";
+  if (followups && followups.length > 0) {
+    followupBlock =
+      `\n\n## 待追问事项\n\n` +
+      `你之前安排了以下待追问的问题。请在合适的时机自然地提起（1-2 个即可，不要一次性全部抛出）。\n\n` +
+      followups
+        .map(
+          (f, i) =>
+            `${i + 1}. [ID: ${f.id}] ${f.question}`
+        )
+        .join("\n") +
+      `\n\n提起后调用 resolve_followup(id, "asked")，用户回应后调用 resolve_followup(id, "completed")。`;
+  }
+
   switch (mode) {
     case "think":
-      userMessage = `/think 模式 — 深度对话\n\n用户说：${text}\n\n请进入教练或倾听者模式。先理解他的完整处境，可以参考过往记录（用 read_note 或 search_vault）。不要急着归档，先帮助他理清思路。`;
+      userMessage = `/think 模式 — 深度对话\n\n用户说：${text}\n\n请进入教练或倾听者模式。先理解他的完整处境，可以参考过往记录（用 read_note 或 search_vault）。不要急着归档，先帮助他理清思路。${followupBlock}`;
       break;
     case "search":
-      userMessage = `用户搜索了："${text}"\n\n请使用 search_vault 工具搜索相关内容，然后根据搜索结果回答。必须引用文件路径 [[路径]]。如果搜不到相关内容，诚实告知。`;
+      userMessage = `用户搜索了："${text}"\n\n请使用 search_vault 工具搜索相关内容，然后根据搜索结果回答。必须引用文件路径 [[路径]]。如果搜不到相关内容，诚实告知。${followupBlock}`;
       break;
     case "recap":
-      userMessage = `用户触发了复盘。最近日期：${new Date().toISOString().slice(0, 10)}。\n\n请搜索最近的笔记（特别是情绪日记 §9 和决策档案 §14），生成一份本周复盘摘要。包括：情绪趋势、关键事件、与价值观的一致性、值得注意的模式。`;
+      userMessage = `用户触发了复盘。最近日期：${new Date().toISOString().slice(0, 10)}。\n\n请搜索最近的笔记（特别是情绪日记 §9 和决策档案 §14），生成一份本周复盘摘要。包括：情绪趋势、关键事件、与价值观的一致性、值得注意的模式。${followupBlock}`;
+      break;
+    default:
+      if (followupBlock) {
+        userMessage = text + followupBlock;
+      }
       break;
   }
 

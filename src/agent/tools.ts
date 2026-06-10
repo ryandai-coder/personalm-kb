@@ -1,5 +1,5 @@
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
-import type { ToolExecutorFn } from "../llm/deepseek";
+import type { ToolExecutorFn } from "../llm/client";
 import type { AuditAdapter } from "../vault/writer";
 import type * as VaultNS from "../vault/index";
 import type * as IndexNS from "../index/store";
@@ -63,13 +63,14 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "search_vault",
-      description: "在知识库中语义搜索相关内容。",
+      description: "在知识库中搜索相关内容。默认使用混合模式（语义+关键词）。",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "搜索关键词" },
+          query: { type: "string", description: "搜索关键词或自然语言查询" },
           max_results: { type: "number", description: "最大返回条数" },
           filter_tags: { type: "array", items: { type: "string" }, description: "按分类标签过滤" },
+          mode: { type: "string", enum: ["hybrid", "semantic", "keyword"], description: "搜索模式：hybrid=混合（默认），semantic=语义，keyword=关键词" },
         },
         required: ["query"],
       },
@@ -87,6 +88,26 @@ export const TOOL_DEFINITIONS: ChatCompletionTool[] = [
           context: { type: "string", description: "为什么需要追问的背景说明" },
         },
         required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "resolve_followup",
+      description:
+        "更新一条追问的状态。在对话中提起追问后标记为 asked，用户回应后标记为 completed。如果用户明确不想回答或话题已过去，标记为 dismissed。",
+      parameters: {
+        type: "object",
+        properties: {
+          followup_id: { type: "string", description: "追问记录的 ID" },
+          status: {
+            type: "string",
+            enum: ["asked", "completed", "dismissed", "deferred"],
+            description: "追问的新状态",
+          },
+        },
+        required: ["followup_id", "status"],
       },
     },
   },
@@ -127,7 +148,7 @@ export function createToolExecutors(deps: ToolDeps): Record<string, ToolExecutor
           linked: (args.linked as string[]) || [],
           sensitivity: (args.sensitivity as string) || "low",
           evidence: (args.evidence_level as string) || "L1",
-          source: "telegram",
+          source: "cli",
         },
         audit,
       });
@@ -178,6 +199,7 @@ export function createToolExecutors(deps: ToolDeps): Record<string, ToolExecutor
       const results = await vault.searchVault(args.query as string, {
         maxResults: (args.max_results as number) || 5,
         filterTags: args.filter_tags as string[] | undefined,
+        mode: (args.mode as "hybrid" | "semantic" | "keyword") || "hybrid",
       });
       return {
         query: args.query,
@@ -191,14 +213,19 @@ export function createToolExecutors(deps: ToolDeps): Record<string, ToolExecutor
     },
 
     async schedule_followup(args: Record<string, unknown>) {
-      if (index) {
-        await index.createFollowup({
-          triggerNoteId: "manual",
-          question: args.question as string,
-          status: "pending",
-        });
-      }
-      return { question: args.question, status: "scheduled" };
+      const id = await index.createFollowup({
+        triggerNoteId: "manual",
+        question: args.question as string,
+        status: "pending",
+      });
+      return { followup_id: id, question: args.question, status: "scheduled" };
+    },
+
+    async resolve_followup(args: Record<string, unknown>) {
+      const followupId = args.followup_id as string;
+      const status = (args.status as string) || "completed";
+      await index.resolveFollowup(followupId, status);
+      return { followup_id: followupId, status };
     },
   };
 }

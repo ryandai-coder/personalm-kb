@@ -1,6 +1,6 @@
 node_modules/
 .env
 *.log
-vault/_system/audit.log
+vault/
 .DS_Store
 dist/

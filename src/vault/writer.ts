@@ -4,6 +4,19 @@ import { createHash } from "crypto";
 import { vaultAbsolute, readRaw } from "./reader";
 import { logger } from "../utils/logger";
 
+// Lazy-import embeddings to avoid circular deps at module load
+async function triggerEmbed(filePath: string, content: string): Promise<void> {
+  try {
+    const { embedNote, loadEmbeddingCache, saveEmbeddingCache } = await import("./embeddings");
+    const cache = await loadEmbeddingCache();
+    await embedNote(filePath, content, cache);
+    await saveEmbeddingCache(cache);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.debug(`Background embedding skipped: ${msg}`);
+  }
+}
+
 export interface AuditAdapter {
   logWrite(entry: { filePath: string; action: string; detail: Record<string, unknown> }): Promise<void>;
 }
@@ -59,7 +72,7 @@ export function buildFrontmatter(meta: FrontmatterMeta = {}): string {
     tags: [],
     linked: [],
     sensitivity: "low",
-    source: "telegram_text",
+    source: "cli",
     evidence: "L1",
   };
 
@@ -176,6 +189,10 @@ export async function writeNote(params: WriteNoteParams): Promise<WriteNoteResul
       detail: { ...auditDetail, auditId: undefined },
     });
   }
+
+  // Background: update embedding cache (don't block response)
+  const finalContent = exists ? (await readRaw(relPath)) || content : content;
+  triggerEmbed(relPath, finalContent);
 
   return {
     filePath: relPath,
